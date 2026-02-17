@@ -1,0 +1,23 @@
+[
+  {
+    "sentence": "She ___ to work every day.",
+    "options": ["go", "goes", "going", "gone"],
+    "correct_index": 1,
+    "level": "A2",
+    "topic": "Present Simple"
+  },
+  {
+    "sentence": "I ___ breakfast every morning.",
+    "options": ["eat", "eats", "eating", "ate"],
+    "correct_index": 0,
+    "level": "A2",
+    "topic": "Present Simple"
+  },
+  {
+    "sentence": "They ___ TV now.",
+    "options": ["watch", "watches", "are watching", "watched"],
+    "correct_index": 2,
+    "level": "A2",
+    "topic": "Present Continuous"
+  }
+]
