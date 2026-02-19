@@ -11,13 +11,18 @@ function renderShell(content) {
   app.innerHTML = "";
   const header = document.createElement("header");
   header.innerHTML = `
-    <h1>Bukva YOU</h1>
+    <h1><button class="brand-link" id="brandHome">Bukva YOU</button></h1>
     <button class="button secondary" id="logout">Log out</button>
   `;
   const main = document.createElement("main");
   main.appendChild(content);
   app.appendChild(header);
   app.appendChild(main);
+
+  const brandHomeBtn = header.querySelector("#brandHome");
+  brandHomeBtn.addEventListener("click", () => {
+    renderApp();
+  });
 
   const logoutBtn = header.querySelector("#logout");
   logoutBtn.addEventListener("click", () => {

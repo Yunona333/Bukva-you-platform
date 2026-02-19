@@ -33,6 +33,19 @@ h1 {
   margin: 0;
 }
 
+.brand-link {
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.brand-link:hover {
+  text-decoration: underline;
+}
+
 .card {
   background: #ffffff;
   padding: 24px;
@@ -142,6 +155,10 @@ h1 {
 
 .section-item {
   text-align: left;
+}
+
+.student-greeting {
+  margin-bottom: 16px;
 }
 
 .exercise-counter {

@@ -4,22 +4,28 @@ export function renderStudentView(user) {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = `
     <div class="card">
-      <h2>Hi, ${user.nickname || user.email}! Let's do some English practice 🙂</h2>
+      <h2 id="studentGreeting" class="student-greeting">Hi, ${user.nickname || user.email}! Let's do some English practice 🙂</h2>
       <div id="studentContent"></div>
     </div>
   `;
 
   const studentContent = wrapper.querySelector("#studentContent");
+  const greeting = wrapper.querySelector("#studentGreeting");
   const sectionPath = [];
+
+  function updateGreetingVisibility() {
+    greeting.style.display = sectionPath.length === 0 ? "block" : "none";
+  }
 
   function renderPath() {
     if (sectionPath.length === 0) {
-      return '<p class="tag">Level 1</p>';
+      return "";
     }
 
     const crumbs = sectionPath
       .map((section, index) => `<button class="crumb" data-index="${index}">${section.name}</button>`)
       .join("<span>/</span>");
+
     return `<div class="breadcrumbs">${crumbs}</div>`;
   }
 
@@ -35,8 +41,9 @@ export function renderStudentView(user) {
   }
 
   async function showSections(parentId = null) {
-    const sections = await api.getSections(parentId);
+    updateGreetingVisibility();
 
+    const sections = await api.getSections(parentId);
     if (sections.length === 0 && parentId != null) {
       await showExercises(sectionPath[sectionPath.length - 1]);
       return;
@@ -45,20 +52,9 @@ export function renderStudentView(user) {
     studentContent.innerHTML = `
       ${renderPath()}
       <div class="section-list" id="sectionList"></div>
-      <div id="sectionActions"></div>
     `;
 
     const sectionList = studentContent.querySelector("#sectionList");
-    const actions = studentContent.querySelector("#sectionActions");
-
-    if (sectionPath.length > 0) {
-      actions.innerHTML = '<button class="button secondary" id="backBtn">Назад</button>';
-      actions.querySelector("#backBtn").addEventListener("click", () => {
-        sectionPath.pop();
-        const prev = sectionPath.length > 0 ? sectionPath[sectionPath.length - 1].id : null;
-        showSections(prev);
-      });
-    }
 
     if (sections.length === 0) {
       sectionList.innerHTML = "<p>Разделы отсутствуют.</p>";
@@ -80,22 +76,16 @@ export function renderStudentView(user) {
   }
 
   async function showExercises(section) {
+    updateGreetingVisibility();
+
     const exercises = await api.getExercises(section.id);
     let currentIndex = 0;
-
-    function backToSections() {
-      sectionPath.pop();
-      const parentSectionId = sectionPath.length > 0 ? sectionPath[sectionPath.length - 1].id : null;
-      showSections(parentSectionId);
-    }
 
     if (exercises.length === 0) {
       studentContent.innerHTML = `
         ${renderPath()}
         <p>В этом разделе пока нет упражнений.</p>
-        <button class="button secondary" id="backToSections">Назад к разделам</button>
       `;
-      studentContent.querySelector("#backToSections").addEventListener("click", backToSections);
       bindBreadcrumbs();
       return;
     }
@@ -111,7 +101,6 @@ export function renderStudentView(user) {
         <div class="options" id="options"></div>
         <div id="feedback"></div>
         <button class="button secondary" id="next" style="margin-top: 12px;">Следующее</button>
-        <button class="button secondary" id="backToSections" style="margin-top: 12px; margin-left: 8px;">К разделам</button>
       `;
 
       const optionsWrap = studentContent.querySelector("#options");
@@ -156,7 +145,6 @@ export function renderStudentView(user) {
         renderExercise();
       });
 
-      studentContent.querySelector("#backToSections").addEventListener("click", backToSections);
       bindBreadcrumbs();
     }
 
