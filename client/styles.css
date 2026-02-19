@@ -144,6 +144,18 @@ h1 {
   text-align: left;
 }
 
+.exercise-counter {
+  font-size: 14px;
+  font-weight: 400;
+  margin: 0 0 8px;
+}
+
+.exercise-sentence {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+
 .options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

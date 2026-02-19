@@ -5,7 +5,6 @@ export function renderStudentView(user) {
   wrapper.innerHTML = `
     <div class="card">
       <h2>Hi, ${user.nickname || user.email}! Let's do some English practice 🙂</h2>
-      <p class="tag">Роль: студент</p>
       <div id="studentContent"></div>
     </div>
   `;
@@ -107,9 +106,8 @@ export function renderStudentView(user) {
 
       studentContent.innerHTML = `
         ${renderPath()}
-        <p><strong>Упражнение ${currentIndex + 1} из ${exercises.length}</strong></p>
-        <p>${exercise.sentence}</p>
-        <p class="tag">Тип: ${exercise.exerciseType}</p>
+        <p class="exercise-counter">Упражнение ${currentIndex + 1} из ${exercises.length}</p>
+        <p class="exercise-sentence">${exercise.sentence}</p>
         <div class="options" id="options"></div>
         <div id="feedback"></div>
         <button class="button secondary" id="next" style="margin-top: 12px;">Следующее</button>
