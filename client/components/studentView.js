@@ -1,5 +1,21 @@
 import { api } from "./services.js";
 
+function normalize(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function arraysEqual(a, b) {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function renderStudentView(user) {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = `
@@ -92,7 +108,8 @@ export function renderStudentView(user) {
 
     function renderExercise() {
       const exercise = exercises[currentIndex];
-      const isMultipleChoice = exercise.exerciseType === "multiple_choice";
+      const type = exercise.exerciseType;
+      const content = exercise.contentJson || {};
 
       studentContent.innerHTML = `
         ${renderPath()}
@@ -106,16 +123,20 @@ export function renderStudentView(user) {
       const optionsWrap = studentContent.querySelector("#options");
       const feedback = studentContent.querySelector("#feedback");
       const nextBtn = studentContent.querySelector("#next");
+      nextBtn.disabled = true;
 
-      if (isMultipleChoice) {
-        nextBtn.disabled = true;
-        exercise.options.forEach((option, index) => {
+      if (type === "multiple_choice") {
+        const options = Array.isArray(content.options) ? content.options : exercise.options;
+        const correctIndex = Number.isInteger(content.correct_index)
+          ? content.correct_index
+          : exercise.correctIndex;
+
+        options.forEach((option, index) => {
           const btn = document.createElement("button");
           btn.className = "button secondary";
           btn.textContent = option;
           btn.addEventListener("click", async () => {
-            const isCorrect = index === exercise.correctIndex;
-
+            const isCorrect = index === correctIndex;
             feedback.textContent = isCorrect ? "Верно!" : "Неправильно.";
             feedback.className = isCorrect ? "notice success" : "notice error";
 
@@ -134,10 +155,137 @@ export function renderStudentView(user) {
           });
           optionsWrap.appendChild(btn);
         });
+      } else if (type === "fill_in_the_blanks") {
+        const parts = Array.isArray(content.parts) ? content.parts : [];
+        const line = document.createElement("div");
+        line.className = "fill-line";
+
+        const inputs = [];
+        parts.forEach((part) => {
+          if (part.type === "text") {
+            const span = document.createElement("span");
+            span.textContent = String(part.value || "");
+            line.appendChild(span);
+          }
+
+          if (part.type === "input") {
+            const input = document.createElement("input");
+            input.className = "fill-input";
+            input.type = "text";
+            input.dataset.answer = String(part.answer || "");
+            inputs.push(input);
+            line.appendChild(input);
+          }
+        });
+
+        const checkBtn = document.createElement("button");
+        checkBtn.className = "button secondary";
+        checkBtn.textContent = "Проверить";
+
+        checkBtn.addEventListener("click", async () => {
+          if (inputs.length === 0) {
+            feedback.textContent = "Некорректная структура упражнения.";
+            feedback.className = "notice error";
+            return;
+          }
+
+          const isCorrect = inputs.every((input) => normalize(input.value) === normalize(input.dataset.answer));
+          feedback.textContent = isCorrect ? "Верно!" : "Неправильно.";
+          feedback.className = isCorrect ? "notice success" : "notice error";
+
+          await api.saveResult(exercise.id, -1, isCorrect);
+          if (isCorrect) {
+            nextBtn.disabled = false;
+            inputs.forEach((input) => {
+              input.disabled = true;
+            });
+            checkBtn.disabled = true;
+          }
+        });
+
+        optionsWrap.appendChild(line);
+        optionsWrap.appendChild(checkBtn);
+      } else if (type === "sentence_builder") {
+        const words = Array.isArray(content.words) ? content.words.map(String) : [];
+        const correctOrder = Array.isArray(content.correct_order)
+          ? content.correct_order.map((item) => normalize(item))
+          : [];
+
+        const pool = document.createElement("div");
+        pool.className = "builder-pool";
+
+        const answer = document.createElement("div");
+        answer.className = "builder-answer";
+
+        const controls = document.createElement("div");
+        controls.className = "builder-controls";
+
+        const checkBtn = document.createElement("button");
+        checkBtn.className = "button secondary";
+        checkBtn.textContent = "Проверить";
+
+        const resetBtn = document.createElement("button");
+        resetBtn.className = "button secondary";
+        resetBtn.textContent = "Сброс";
+
+        controls.appendChild(checkBtn);
+        controls.appendChild(resetBtn);
+
+        let selectedWords = [];
+
+        function renderBuilder() {
+          pool.innerHTML = "";
+          answer.innerHTML = "";
+
+          words.forEach((word, index) => {
+            if (selectedWords.includes(index)) {
+              return;
+            }
+            const wordBtn = document.createElement("button");
+            wordBtn.className = "button secondary builder-word";
+            wordBtn.textContent = word;
+            wordBtn.addEventListener("click", () => {
+              selectedWords.push(index);
+              renderBuilder();
+            });
+            pool.appendChild(wordBtn);
+          });
+
+          selectedWords.forEach((index) => {
+            const token = document.createElement("span");
+            token.className = "builder-token";
+            token.textContent = words[index];
+            answer.appendChild(token);
+          });
+        }
+
+        checkBtn.addEventListener("click", async () => {
+          const attempt = selectedWords.map((index) => normalize(words[index]));
+          const isCorrect = arraysEqual(attempt, correctOrder);
+
+          feedback.textContent = isCorrect ? "Верно!" : "Неправильно.";
+          feedback.className = isCorrect ? "notice success" : "notice error";
+
+          await api.saveResult(exercise.id, -1, isCorrect);
+          if (isCorrect) {
+            nextBtn.disabled = false;
+            checkBtn.disabled = true;
+            resetBtn.disabled = true;
+          }
+        });
+
+        resetBtn.addEventListener("click", () => {
+          selectedWords = [];
+          renderBuilder();
+        });
+
+        renderBuilder();
+        optionsWrap.appendChild(pool);
+        optionsWrap.appendChild(answer);
+        optionsWrap.appendChild(controls);
       } else {
         nextBtn.disabled = false;
-        optionsWrap.innerHTML =
-          '<p class="notice">Этот тип упражнения будет добавлен на следующем этапе интерфейса.</p>';
+        optionsWrap.innerHTML = '<p class="notice">Этот тип упражнения пока не поддерживается.</p>';
       }
 
       nextBtn.addEventListener("click", () => {

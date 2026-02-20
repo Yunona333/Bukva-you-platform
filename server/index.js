@@ -9,7 +9,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
-const SUPPORTED_EXERCISE_TYPES = new Set(["multiple_choice", "text_input", "sentence_builder"]);
+const SUPPORTED_EXERCISE_TYPES = new Set([
+  "multiple_choice",
+  "fill_in_the_blanks",
+  "sentence_builder"
+]);
 
 const RESERVED_NICKNAMES = new Set([
   "admin",
@@ -130,6 +134,15 @@ function parseOptionsJson(value) {
   }
 }
 
+function parseContentJson(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 function buildSectionsTree(rows) {
   const byId = new Map();
   rows.forEach((row) => {
@@ -170,6 +183,97 @@ function parseNullableParentId(value) {
   }
   const id = Number.parseInt(value, 10);
   return Number.isNaN(id) ? undefined : id;
+}
+
+function normalizeWord(word) {
+  return String(word || "").trim().toLowerCase();
+}
+
+function validateMultipleChoiceContent(content) {
+  if (!content || typeof content !== "object") {
+    return "content_json is required";
+  }
+
+  const options = content.options;
+  const correctIndex = Number.parseInt(content.correct_index, 10);
+
+  if (!Array.isArray(options) || options.length !== 4) {
+    return "multiple_choice requires 4 options";
+  }
+  if (options.some((item) => !String(item || "").trim())) {
+    return "multiple_choice options cannot be empty";
+  }
+  if (Number.isNaN(correctIndex) || correctIndex < 0 || correctIndex > 3) {
+    return "multiple_choice requires valid correct_index";
+  }
+
+  return null;
+}
+
+function validateFillInTheBlanksContent(content) {
+  if (!content || typeof content !== "object" || !Array.isArray(content.parts)) {
+    return "fill_in_the_blanks requires parts array";
+  }
+
+  if (content.parts.length === 0) {
+    return "fill_in_the_blanks parts cannot be empty";
+  }
+
+  let inputCount = 0;
+  for (const part of content.parts) {
+    if (!part || typeof part !== "object") {
+      return "Invalid part in fill_in_the_blanks";
+    }
+
+    if (part.type === "text") {
+      if (typeof part.value !== "string") {
+        return "Text parts must have string value";
+      }
+      continue;
+    }
+
+    if (part.type === "input") {
+      inputCount += 1;
+      if (!String(part.answer || "").trim()) {
+        return "Each input part must have answer";
+      }
+      continue;
+    }
+
+    return "Part type must be text or input";
+  }
+
+  if (inputCount < 1) {
+    return "fill_in_the_blanks must contain at least one input";
+  }
+
+  return null;
+}
+
+function validateSentenceBuilderContent(content) {
+  if (!content || typeof content !== "object") {
+    return "content_json is required";
+  }
+
+  const words = Array.isArray(content.words) ? content.words : null;
+  const correctOrder = Array.isArray(content.correct_order) ? content.correct_order : null;
+
+  if (!words || !correctOrder || words.length === 0 || correctOrder.length === 0) {
+    return "sentence_builder requires non-empty words and correct_order";
+  }
+
+  if (words.length !== correctOrder.length) {
+    return "sentence_builder words and correct_order must have same length";
+  }
+
+  const normalizedWords = words.map(normalizeWord).sort();
+  const normalizedCorrect = correctOrder.map(normalizeWord).sort();
+
+  if (normalizedWords.some((item, index) => item !== normalizedCorrect[index])) {
+    return "sentence_builder words and correct_order must contain same items";
+  }
+
+  return null;
 }
 
 function renderVerificationPage(message) {
@@ -566,7 +670,7 @@ app.get("/api/exercises", authRequired, async (req, res) => {
     }
 
     const rows = await dbAll(
-      `SELECT id, sentence, options_json, correct_index, section_id, exercise_type
+      `SELECT id, sentence, options_json, correct_index, section_id, exercise_type, content_json
        FROM exercises
        ${sectionId == null ? "" : "WHERE section_id = ?"}
        ORDER BY id`,
@@ -574,14 +678,24 @@ app.get("/api/exercises", authRequired, async (req, res) => {
     );
 
     res.json(
-      rows.map((row) => ({
-        id: row.id,
-        sentence: row.sentence,
-        options: parseOptionsJson(row.options_json),
-        correctIndex: row.correct_index,
-        sectionId: row.section_id,
-        exerciseType: row.exercise_type
-      }))
+      rows.map((row) => {
+        const content = parseContentJson(row.content_json) || {};
+        const options = parseOptionsJson(row.options_json);
+        const contentOptions = Array.isArray(content.options) ? content.options : options;
+        const contentCorrect = Number.isInteger(content.correct_index)
+          ? content.correct_index
+          : row.correct_index;
+
+        return {
+          id: row.id,
+          sentence: row.sentence,
+          sectionId: row.section_id,
+          exerciseType: row.exercise_type,
+          contentJson: content,
+          options: contentOptions,
+          correctIndex: contentCorrect
+        };
+      })
     );
   } catch (err) {
     res.status(500).json({ error: "Database error" });
@@ -599,7 +713,7 @@ app.post("/api/results", authRequired, requireRole("student"), (req, res) => {
   db.run(
     "INSERT INTO results (user_id, exercise_id, answer_index, is_correct, created_at) VALUES (?, ?, ?, ?, ?)",
     [req.user.id, exerciseId, answerIndex, isCorrect ? 1 : 0, createdAt],
-    function (err) {
+    function onInsert(err) {
       if (err) {
         res.status(500).json({ error: "Database error" });
         return;
@@ -650,26 +764,58 @@ app.post("/api/exercises", authRequired, requireRole("teacher"), async (req, res
       return;
     }
 
-    let options = Array.isArray(req.body?.options) ? req.body.options : [];
-    let correctIndex = Number.parseInt(req.body?.correctIndex, 10);
+    let content = req.body?.content_json ?? req.body?.contentJson;
+    if (typeof content === "string") {
+      content = parseContentJson(content);
+    }
+
+    if (!content || typeof content !== "object") {
+      if (exerciseType === "multiple_choice") {
+        const legacyOptions = Array.isArray(req.body?.options) ? req.body.options : [];
+        const legacyCorrectIndex = Number.parseInt(req.body?.correctIndex, 10);
+        content = {
+          options: legacyOptions,
+          correct_index: legacyCorrectIndex
+        };
+      } else {
+        res.status(400).json({ error: "content_json is required" });
+        return;
+      }
+    }
+
+    let optionsJson = "[]";
+    let correctIndex = -1;
 
     if (exerciseType === "multiple_choice") {
-      if (!Array.isArray(options) || options.length !== 4 || options.some((item) => !String(item).trim())) {
-        res.status(400).json({ error: "Multiple choice requires 4 options" });
+      const validationError = validateMultipleChoiceContent(content);
+      if (validationError) {
+        res.status(400).json({ error: validationError });
         return;
       }
-      if (Number.isNaN(correctIndex) || correctIndex < 0 || correctIndex > 3) {
-        res.status(400).json({ error: "Invalid correctIndex for multiple_choice" });
+
+      optionsJson = JSON.stringify(content.options);
+      correctIndex = Number.parseInt(content.correct_index, 10);
+    }
+
+    if (exerciseType === "fill_in_the_blanks") {
+      const validationError = validateFillInTheBlanksContent(content);
+      if (validationError) {
+        res.status(400).json({ error: validationError });
         return;
       }
-    } else {
-      options = [];
-      correctIndex = -1;
+    }
+
+    if (exerciseType === "sentence_builder") {
+      const validationError = validateSentenceBuilderContent(content);
+      if (validationError) {
+        res.status(400).json({ error: validationError });
+        return;
+      }
     }
 
     const insert = await dbRun(
-      "INSERT INTO exercises (sentence, options_json, correct_index, section_id, exercise_type) VALUES (?, ?, ?, ?, ?)",
-      [sentence, JSON.stringify(options), correctIndex, sectionId, exerciseType]
+      "INSERT INTO exercises (sentence, options_json, correct_index, section_id, exercise_type, content_json) VALUES (?, ?, ?, ?, ?, ?)",
+      [sentence, optionsJson, correctIndex, sectionId, exerciseType, JSON.stringify(content)]
     );
 
     res.json({ id: insert.lastID });

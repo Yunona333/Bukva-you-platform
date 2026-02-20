@@ -12,7 +12,6 @@ const DB_PATH =
 const EXERCISES_PATH = path.join(process.cwd(), "exercises.json");
 
 sqlite3.verbose();
-
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 export const db = new sqlite3.Database(DB_PATH);
@@ -53,6 +52,13 @@ function all(sql, params = []) {
   });
 }
 
+function buildMultipleChoiceContent(options, correctIndex) {
+  return {
+    options,
+    correct_index: correctIndex
+  };
+}
+
 async function addColumnIfMissing(table, column, definition) {
   const rows = await all(`PRAGMA table_info(${table})`);
   const exists = rows.some((row) => row.name === column);
@@ -91,23 +97,21 @@ async function ensureExercise(sectionId, exercise) {
     "SELECT id FROM exercises WHERE section_id = ? AND sentence = ? LIMIT 1",
     [sectionId, exercise.sentence]
   );
+
+  const optionsJson = JSON.stringify(exercise.options);
+  const contentJson = JSON.stringify(buildMultipleChoiceContent(exercise.options, exercise.correctIndex));
+
   if (existing) {
     await run(
-      "UPDATE exercises SET options_json = ?, correct_index = ?, exercise_type = 'multiple_choice' WHERE id = ?",
-      [JSON.stringify(exercise.options), exercise.correctIndex, existing.id]
+      "UPDATE exercises SET options_json = ?, correct_index = ?, exercise_type = 'multiple_choice', content_json = ? WHERE id = ?",
+      [optionsJson, exercise.correctIndex, contentJson, existing.id]
     );
     return existing.id;
   }
 
   const insert = await run(
-    "INSERT INTO exercises (sentence, options_json, correct_index, section_id, exercise_type) VALUES (?, ?, ?, ?, ?)",
-    [
-      exercise.sentence,
-      JSON.stringify(exercise.options),
-      exercise.correctIndex,
-      sectionId,
-      "multiple_choice"
-    ]
+    "INSERT INTO exercises (sentence, options_json, correct_index, section_id, exercise_type, content_json) VALUES (?, ?, ?, ?, ?, ?)",
+    [exercise.sentence, optionsJson, exercise.correctIndex, sectionId, "multiple_choice", contentJson]
   );
   return insert.lastID;
 }
@@ -169,9 +173,11 @@ async function seedExercises(defaultSectionId) {
   for (const item of items) {
     const correctIndex =
       typeof item.correctIndex === "number" ? item.correctIndex : item.correct_index;
+    const options = item.options || [];
+    const contentJson = JSON.stringify(buildMultipleChoiceContent(options, correctIndex));
     await run(
-      "INSERT INTO exercises (sentence, options_json, correct_index, section_id, exercise_type) VALUES (?, ?, ?, ?, ?)",
-      [item.sentence, JSON.stringify(item.options), correctIndex, defaultSectionId, "multiple_choice"]
+      "INSERT INTO exercises (sentence, options_json, correct_index, section_id, exercise_type, content_json) VALUES (?, ?, ?, ?, ?, ?)",
+      [item.sentence, JSON.stringify(options), correctIndex, defaultSectionId, "multiple_choice", contentJson]
     );
   }
 }
@@ -181,6 +187,37 @@ async function migrateExercises(defaultSectionId) {
   await run(
     "UPDATE exercises SET exercise_type = 'multiple_choice' WHERE exercise_type IS NULL OR exercise_type = ''"
   );
+
+  const rows = await all(
+    "SELECT id, options_json, correct_index, exercise_type, content_json FROM exercises"
+  );
+
+  for (const row of rows) {
+    if (row.exercise_type !== "multiple_choice") {
+      if (!row.content_json || String(row.content_json).trim() === "") {
+        await run("UPDATE exercises SET content_json = '{}' WHERE id = ?", [row.id]);
+      }
+      continue;
+    }
+
+    const hasContent = row.content_json && String(row.content_json).trim() !== "";
+    if (hasContent) {
+      continue;
+    }
+
+    let options = [];
+    try {
+      options = JSON.parse(row.options_json || "[]");
+      if (!Array.isArray(options)) {
+        options = [];
+      }
+    } catch (err) {
+      options = [];
+    }
+
+    const contentJson = JSON.stringify(buildMultipleChoiceContent(options, row.correct_index));
+    await run("UPDATE exercises SET content_json = ? WHERE id = ?", [contentJson, row.id]);
+  }
 }
 
 async function seedA1A2PlacementExercises(sectionId) {
@@ -362,7 +399,8 @@ export function initDb() {
               "exercises",
               "exercise_type",
               "TEXT NOT NULL DEFAULT 'multiple_choice'"
-            )
+            ),
+            addColumnIfMissing("exercises", "content_json", "TEXT NOT NULL DEFAULT '{}'" )
           ]);
 
           await run("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nickname ON users(nickname)");

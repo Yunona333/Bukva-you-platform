@@ -180,6 +180,58 @@ h1 {
   margin-top: 16px;
 }
 
+.dynamic-block {
+  margin-bottom: 10px;
+}
+
+.fill-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  line-height: 1.6;
+}
+
+.fill-input {
+  min-width: 110px;
+  border: 1px solid #c3b6a6;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 14px;
+}
+
+.builder-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.builder-word {
+  white-space: nowrap;
+}
+
+.builder-answer {
+  min-height: 42px;
+  border: 1px dashed #c3b6a6;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.builder-token {
+  background: #efe7dc;
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.builder-controls {
+  display: flex;
+  gap: 8px;
+}
+
 .tag {
   padding: 6px 10px;
   border-radius: 10px;
